@@ -31,19 +31,19 @@ object Main {
                                            conf.getString("db.dbname"),
                                                   10)
 
-//    val enums = 0 until 50 map { _ =>
-//      pool.query(selectQuery).enumerate
-//    } reduceLeft { (a, b) => a >>> b }
-//
-//    var count = 0
-//    val f = enums >>>
-//      Enumerator.eof |>>
-//      Iteratee.foreach[RowIterator]{ r => println(s"$count: Found Data: " + r.dataMap); count += 1}
-//
-//    Await.result(f, 4.seconds)
+    val enums = 0 until 50 map { _ =>
+      pool.query(selectQuery).enumerate
+    } reduceLeft ( _ >>> _ )
 
-    println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
-    println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
+    var count = 0
+    val f = enums >>>
+      Enumerator.eof |>>
+      Iteratee.foreach[RowIterator]{ r => println(s"$count: Found Data: " + r.dataMap); count += 1}
+
+    Await.result(f, 4.seconds)
+
+    //println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
+    //println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
 
     pool.close()
   }

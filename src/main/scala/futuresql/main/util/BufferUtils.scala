@@ -29,6 +29,19 @@ object BufferUtils {
     str.result()
   }
 
+  def putByte(buff: ByteBuffer, byte: Byte) {
+    val b = if(byte < 0) byte + 256 else byte
+    putHalfByte(buff, b >> 4)
+    putHalfByte(buff, b & 0xf)
+
+  }
+
+  @inline
+  private def putHalfByte(buff: ByteBuffer, i: Int) {
+    if (i < 10) buff.put((i + '0').asInstanceOf[Byte])
+    else buff.put((i + 'a' - 10).asInstanceOf[Byte])
+  }
+
   def setLength(buff: ByteBuffer) {
     val pos = buff.position()
     buff.position(1)

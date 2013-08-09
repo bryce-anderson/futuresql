@@ -21,4 +21,7 @@ object MessageCodes {
   val ParseComplete       = '1'
   val EmptyQueryResponse  = 'I'
   val NoticeResponse      = 'N'
+  val Bind                = 'B'
+  val BindComplete        = '2'
+  val Execute             = 'E'
 }

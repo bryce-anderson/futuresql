@@ -11,17 +11,16 @@ import futuresql.postgres.util.PGOid
  */
 class RowIterator(disc: RowDescription, row: DataRow) extends Iterator[String] {
 
-  private val data = disc.columns.iterator.zipWithIndex
+  private val data = disc.columns.iterator.zip(row.columns.iterator)
 
-  def dataMap: Map[String, String] = data.map{ case (col, i) => (col.name,TextRowParser.parseString(row.columns(i))) }.toMap
+  def dataMap: Map[String, String] = data.map{ case (col, bytes) => (col.name,TextRowParser.parseString(bytes)) }.toMap
 
   def hasNext: Boolean = data.hasNext
 
   def next(): String = TextRowParser.parseString(nextBytes())
 
   private def nextBytes(): Array[Byte] = {
-    val (_, i) = data.next()
-    row.columns(i)
+    data.next()._2
   }
 
   def nextString() = next()
@@ -37,11 +36,14 @@ class RowIterator(disc: RowDescription, row: DataRow) extends Iterator[String] {
   def nextDouble(): Double = TextRowParser.parseDouble(nextBytes())
 
   def nextDate(): Date = {
-    val (col, i) = data.next()
+    val (col, bytes) = data.next()
 
-    TextRowParser.parseDate(row.columns(i), col.dtype)
+    TextRowParser.parseDate(bytes, col.dtype)
   }
 
-  def nextBlob(): Array[Byte] = nextBytes() // TODO: is there a code for this data type?
+  def nextBlob(): Array[Byte] = {
+    val (col, bytes) = data.next()                         // TODO: is there a code for this data type?
+    TextRowParser.parseBlob(col, bytes)
+  }
 
 }

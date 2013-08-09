@@ -76,7 +76,7 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
 
 
   def query(query: String): QueryResult = lock.synchronized {
-    if(_isClosed) sys.error("Attempted to submit query to closed connection pool.")
+    if(_isClosed) sys.error("Attempted to submit inQuery to closed connection pool.")
     if(!connectionQueue.isEmpty) {
       val conn = connectionQueue.dequeue()
       new QueryResult(conn.query(query))

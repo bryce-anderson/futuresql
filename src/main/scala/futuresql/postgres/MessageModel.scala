@@ -6,6 +6,7 @@ import BufferUtils._
 import java.security.MessageDigest
 import futuresql.main.{WritableMessage, Message, RowIterator}
 import futuresql.main.util.BufferUtils
+import futuresql.postgres.types.QueryParam
 
 /**
  * @author Bryce Anderson
@@ -87,7 +88,7 @@ case class RowDescription(columns: List[Column]) extends PostgresMessage(Message
   def parseRow(row: DataRow) = new RowIterator(self, row)
 }
 
-case class Parse(statement: String, name: String, paramTypes: List[Int]) extends WritablePostgresMessage(MessageCodes.Parse) {
+case class Parse(statement: String, name: String = "", paramTypes: List[Int] = Nil) extends WritablePostgresMessage(MessageCodes.Parse) {
   def toBuffer: ByteBuffer = {
     val paramscount = paramTypes.length
     val size = 4 + (statement.length + 1) + (name.length + 1) + 2 + 4*paramscount // size argument
@@ -99,6 +100,53 @@ case class Parse(statement: String, name: String, paramTypes: List[Int]) extends
     putString(buff, statement)
     buff.putShort(paramscount.asInstanceOf[Short])
     paramTypes.foreach(buff.putInt(_))
+    buff.flip()
+    buff
+  }
+}
+
+case class Execute(portal: String = "", maxRows: Int = 0) extends WritablePostgresMessage(MessageCodes.Execute) {
+  def toBuffer: ByteBuffer = {
+    val size = 4 + portal.length + 1 + 4
+    val buff = newBuff(size + 1)
+    buff.put(code.toByte)
+    buff.putInt(size)
+    putString(buff, portal)
+    buff.putInt(maxRows)
+    buff.flip()
+    buff
+  }
+}
+
+case object BindComplete extends PostgresMessage(MessageCodes.BindComplete)
+
+case class Bind(portal: String = "", statement: String = "")(params: QueryParam*) extends WritablePostgresMessage(MessageCodes.Bind) {
+  def toBuffer: ByteBuffer = {
+
+    val len = 4 +
+              portal.length + 1 +
+              statement.length + 1 +
+              2 + params.length*2 +        // Format codes
+              2 + params.foldLeft(0){ (i, p) => p.wireSize + 4 + i} + // The param fields and their lengths
+              2   // the length of the format codes for return types
+
+    val buff = newBuff(len + 1)
+    buff.put(MessageCodes.Bind.toByte)
+    buff.putInt(len)  // Message length
+    putString(buff, portal)
+    putString(buff, statement)
+
+    // Set binary or not
+    buff.putShort(params.length.asInstanceOf[Short])
+    params.foreach( p => buff.putShort(p.formatCode) )
+
+    // set the params
+    buff.putShort(params.length.asInstanceOf[Short])
+    params.foreach { p => buff.putInt(p.wireSize); p.writeBuffer(buff) }
+
+    // Don't request return param types...
+    buff.putShort(0.asInstanceOf[Short])
+
     buff.flip()
     buff
   }

@@ -3,18 +3,19 @@ package futuresql.postgres
 
 import scala.concurrent.{Await, Promise, ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success}
 import scala.collection.mutable.ListBuffer
 
 import java.nio.channels.{CompletionHandler, AsynchronousSocketChannel}
 import java.net.InetSocketAddress
 import java.util.concurrent.ExecutionException
-import java.io.IOException
+import java.io.{StringWriter, IOException}
 
-import play.api.libs.iteratee.{Input, Enumerator}
+import play.api.libs.iteratee.{Enumerator}
 
 import futuresql.nio.{AsyncWriteBuffer, AsyncReadBuffer}
-import futuresql.main.{BufferingEnumerator, AsyncMessageBuffer, Message, RowIterator}
+import futuresql.main._
+import scala.util.Failure
+import scala.util.Success
 
 /**
  * @author Bryce Anderson
@@ -158,6 +159,13 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     }
   }
 
+  private def onFailedQuery(msg: String, t: Throwable) {
+    val buff = new StringWriter()
+    if (t != null) t.printStackTrace() // TODO: Do this better.
+    log(s"Query failed: $msg.")
+    recycleConnection()
+  }
+
   private def cancelQuery() {
     log("Canceling Query.")
     try {
@@ -173,47 +181,23 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     } finally  recycleConnection()
   }
 
-  private def feedRows(desc: RowDescription, pusher: Input[RowIterator] => Boolean) {
-    messagebuff.getMessage().onComplete {
-      case Success(m: DataRow) =>
-        if (!pusher(Input.El(new RowIterator(desc, m)))) feedRows(desc, pusher)
-        else cancelQuery()
-
-      case Success(CommandComplete(msg)) =>
-        log("Command complete: " + msg)
-        pusher(Input.EOF)
-        recycleConnection()
-
-      case Success(m: Message) =>
-        log("Found unexpected message: " + m)
-        sys.error("Don't know how to respond to message: " + m)
-
-      case Failure(t) =>  throw new Exception("Failed to parse.", t)
-    }
-  }
-
-  def query(query: String): Future[Enumerator[RowIterator]] = {
-    val q = SimpleQuery(query)
+  def query(inQuery: String): Future[Enumerator[RowIterator]] = {
+    val q = SimpleQuery(inQuery)
     val p = Promise[Enumerator[RowIterator]]
     writebuff.writeBuffer(q.toBuffer).onComplete {
       case Success(_) =>
-        messagebuff.getMessage().map {
-          case EmptyQueryResponse =>
-            p.complete(Success(Enumerator()))
-            recycleConnection()
-
-          case CommandComplete(msg) =>
-            log("Command complete: " + msg)
-            recycleConnection()
-            p.complete(Success(Enumerator()))
-
-          case desc: RowDescription =>  // Getting data. Start to read
-            val (pusher, enum) = BufferingEnumerator.get[RowIterator]
-            feedRows(desc, pusher)
-            p.complete(Success(enum))
-
-          case other => log("Found unexpected message: " + other); handleUnexpected(other, p, "SimpleQuery")
+        val pipeline = new SimpleQueryPipeline {
+          def writebuff = self.writebuff
+          def query = inQuery
+          def messagebuff: MessageBuffer = self.messagebuff
+          def log(msg: String) = self.log(msg)
+          implicit def ec: ExecutionContext = self.ec
+          def cancelQuery() = self.cancelQuery()
+          def onFinished() = self.recycleConnection()
         }
+
+        val enum = pipeline.run()
+        p.completeWith(enum)
 
       case Failure(t) => p.complete(Failure(t))
     }
