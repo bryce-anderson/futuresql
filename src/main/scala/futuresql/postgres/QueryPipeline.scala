@@ -34,7 +34,7 @@ trait QueryPipeline {
   }
 
   def runRows(desc: RowDescription): Enumerator[RowIterator] = {
-    val (pusher, enum) = BufferingEnumerator.get[RowIterator]
+    val (pusher, enum) = BufferingEnumerator[RowIterator]
     def cycle() {
       messagebuff.getMessage().onComplete {
         case Success(m: DataRow) =>

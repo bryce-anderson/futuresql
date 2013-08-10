@@ -12,7 +12,6 @@ object Main {
     println("Hello world!")
 
     postgresPool()
-    Thread.sleep(1000)
     println("Ending Test program.")
   }
 
@@ -31,8 +30,9 @@ object Main {
                                            conf.getString("db.dbname"),
                                                   1)
 
-    val enums = 0 until 10 map { _ =>
-      pool.preparedQuery(selectQuery).enumerate
+    val enums = 0 until 5 map { _ =>
+      pool.preparedQuery("""select * from users usr where usr.id = $1""", 1).enumerate
+      //pool.query(selectQuery).enumerate
     } reduceLeft ( _ >>> _ )
 
     var count = 0
@@ -42,8 +42,8 @@ object Main {
 
     Await.result(f, 4.seconds)
 
-    println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
-    println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
+//    println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
+//    println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
 
     pool.close()
   }

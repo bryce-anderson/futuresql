@@ -11,7 +11,7 @@ import scala.util.Success
  */
 
 object BufferingEnumerator {
-  def get[A](implicit ec: ExecutionContext): (Input[A] => Boolean, BufferingEnumerator[A]) = {
+  def apply[A](implicit ec: ExecutionContext): (Input[A] => Boolean, BufferingEnumerator[A]) = {
     val enum = new BufferingEnumerator[A]()
     (enum.feedInput(_), enum)
   }

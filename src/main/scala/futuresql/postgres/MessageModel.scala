@@ -141,12 +141,12 @@ case object BindComplete extends PostgresMessage(MessageCodes.BindComplete)
 case class Bind(portal: String = "", statementName: String = "")(params: Seq[QueryParam]) extends WritablePostgresMessage(MessageCodes.Bind) {
   def toBuffer: ByteBuffer = {
 
-    println("Params: " + params.foldLeft("")(_ + ", " + _))
+    //println("Params: " + params.reduceLeftOption(_ + ", " + _).getOrElse("None"))
 
     val len = 4 +
               portal.length + 1 +
               statementName.length + 1 +
-              2 + params.length*2 +        // Format codes
+              2 + //params.length*2 +        // Format codes
               2 + params.foldLeft(0){ (i, p) => p.wireSize + 4 + i} + // The param fields and their lengths
               2   // the length of the format codes for return types
 
@@ -157,12 +157,13 @@ case class Bind(portal: String = "", statementName: String = "")(params: Seq[Que
     putString(buff, statementName)
 
     // Set binary or not
-    buff.putShort(params.length.asInstanceOf[Short])
-    params.foreach( p => buff.putShort(p.formatCode) )
+//    buff.putShort(params.length.asInstanceOf[Short])
+//    params.foreach( p => buff.putShort(p.formatCode) )
+    buff.putShort(0)  // All text
 
     // set the params
     buff.putShort(params.length.asInstanceOf[Short])
-    params.foreach { p => buff.putInt(p.wireSize); p.writeBuffer(buff) }
+    params.foreach { p => p.writeBuffer(buff) }
 
     // Don't request return param types...
     buff.putShort(0.asInstanceOf[Short])

@@ -11,13 +11,18 @@ import futuresql.main.util.BufferUtils._
  *         Created on 8/4/13
  */
 trait QueryParam {
-  def writeBuffer(buff: ByteBuffer)
-  def wireSize: Int
-  def formatCode: Short // 0 = text, 1 = binary
+
   def strRepr: String
 
+  def writeBuffer(buff: ByteBuffer) = {
+    buff.putInt(strRepr.length)
+    buff.put(strRepr.getBytes())
+  }
+
+  def wireSize = strRepr.length
+
   def tooBuffer = {
-    val buff = newBuff(wireSize)
+    val buff = newBuff(strRepr.length + 4)
     writeBuffer(buff)
     buff.flip()
     buff
@@ -29,13 +34,6 @@ trait QueryParam {
 object QueryParam {
 
   implicit def byteArrayToParam(in: Array[Byte]) = new QueryParam {
-    def writeBuffer(buff: ByteBuffer) {
-      buff.put('\\'.toByte)
-      buff.put('x'.toByte)
-      for (b <- in) putByte(buff, b)
-    }
-
-    def wireSize: Int = in.length + 2
 
     def strRepr: String = {
       val buff = new StringBuilder
@@ -47,28 +45,11 @@ object QueryParam {
     def formatCode: Short = 0
   }
 
-  def stringToParam(in: String) = new QueryParam {
-    def formatCode: Short = 0
-
-    def wireSize: Int = in.length + 1
-
-    def writeBuffer(buff: ByteBuffer) {
-      putString(buff, in)
-    }
-
-    // 0 = text, 1 = binary
+  implicit def stringToParam(in: String) = new QueryParam {
     def strRepr: String = in
   }
 
-//  implicit def anyToParam[A](in: A) = new QueryParam {
-//    private lazy val bytes = in.toString.getBytes
-//    val wireSize = bytes.length
-//    def formatCode = 0
-//    def writeBuffer(buff: ByteBuffer) {
-//      buff.put(bytes)
-//    }
-//
-//    // 0 = text, 1 = binary
-//    def strRepr: String = in.toString
-//  }
+  implicit def intToParam(in: Int) = new QueryParam {
+    val strRepr = in.toString
+  }
 }

@@ -1,6 +1,6 @@
 package futuresql.postgres
 
-import scala.concurrent.{Promise, ExecutionContext}
+import scala.concurrent.{Future, Promise, ExecutionContext}
 import scala.collection.mutable
 import play.api.libs.iteratee.Enumerator
 import scala.util.{Random, Success}
@@ -10,6 +10,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.ExecutionException
 import java.io.IOException
 import futuresql.postgres.types.QueryParam
+import futuresql.postgres.Connection
 
 /**
  * @author Bryce Anderson
@@ -51,7 +52,9 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
   0 until size foreach { i => connectionQueue += makeConnection(i) }
 
   protected def recycleConnection(conn: Connection): Unit = lock.synchronized {
-    if (!queryQueue.isEmpty) {
+    if(isClosed()) {
+      conn.close()
+    }else if (!queryQueue.isEmpty) {
       queryQueue.dequeue().complete(Success(conn))
     } else {
       connectionQueue += conn
@@ -77,29 +80,21 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
     connectionQueue.clear()
   }
 
-
-  def query(query: String): QueryResult = lock.synchronized {
-    if(_isClosed) sys.error("Attempted to submit inQuery to closed connection pool.")
+  private def runQuery(f: Connection => Future[Enumerator[RowIterator]]) = lock.synchronized {
+    if(_isClosed) sys.error("Attempted to submit query to closed connection pool.")
     if(!connectionQueue.isEmpty) {
       val conn = connectionQueue.dequeue()
-      new QueryResult(conn.query(query))
+      new QueryResult(f(conn))
     } else {
       val p = Promise[Connection]
       queryQueue += p
-      new QueryResult(p.future.flatMap{ conn => conn.query(query)})
+      new QueryResult(p.future.flatMap(conn => f(conn)))
     }
   }
 
-  def preparedQuery(query: String, params: QueryParam*): QueryResult = lock.synchronized {
-    if(_isClosed) sys.error("Attempted to submit inQuery to closed connection pool.")
-    if(!connectionQueue.isEmpty) {
-      val conn = connectionQueue.dequeue()
-      new QueryResult(conn.preparedQuery(query, params))
-    } else {
-      val p = Promise[Connection]
-      queryQueue += p
-      new QueryResult(p.future.flatMap{ conn => conn.query(query)})
-    }
-  }
+  def query(query: String): QueryResult = runQuery( conn => conn.query(query))
+
+  def preparedQuery(query: String, params: QueryParam*): QueryResult =
+    runQuery( conn => conn.preparedQuery(query, params))
 
 }

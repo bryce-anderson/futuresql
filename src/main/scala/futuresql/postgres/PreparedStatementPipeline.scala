@@ -25,13 +25,13 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
   }
 
   private def writeQuery(p: Promise[Enumerator[RowIterator]]) {
-    val parseStatement = Parse(query)   // Don't name these yet
-    writebuff.writeBuffer(parseStatement.toBuffer)
-      .map{ _ => writebuff.writeBuffer(Bind()(params).toBuffer) }
-      .map( _ => writebuff.writeBuffer(Describe("", 'S').toBuffer))
-      .map{ _ => writebuff.writeBuffer(Execute().toBuffer) }
-      .map{ _ => writebuff.writeBuffer(Sync.toBuffer)}
-      .onComplete{ _ => finish(p)}
+      writebuff.writeBuffers(Array(
+        Parse(query).toBuffer,
+        Bind()(params).toBuffer,
+        Describe("", 'S').toBuffer,
+        Execute().toBuffer,
+        Sync.toBuffer
+      )).onComplete{ _ => finish(p)}
   }
 
   private def finish(p: Promise[Enumerator[RowIterator]]) {

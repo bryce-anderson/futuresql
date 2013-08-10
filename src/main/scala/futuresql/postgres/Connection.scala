@@ -151,7 +151,9 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
 
   private def cleanAndRecycle() {
     messagebuff.getMessage().onComplete {
-      case Success(ReadyForQuery(_)) => recycleConnection(self)
+      case Success(ReadyForQuery(_)) =>
+        recycleConnection(self)
+
       case Success(m: Message) =>
         log("Cleaned message:" + m)
         cleanAndRecycle()
@@ -213,10 +215,12 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
 
   def close() {
     _isClosed = true
-    log("Closing Channel")
     writebuff.writeBuffer(Terminate.toBuffer)
              .flatMap( _ => messagebuff.close())
-             .onComplete( _ => channel.close())
+             .onComplete{ _ =>
+                log("Closing Channel")
+                channel.close()
+              }
   }
 
   def handleUnexpected(msg: Message, p: Promise[_], stage: String) = msg match {

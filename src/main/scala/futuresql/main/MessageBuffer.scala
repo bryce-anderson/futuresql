@@ -35,7 +35,7 @@ abstract class AsyncMessageBuffer(buff: AsyncReadBuffer, parser: MessageParser)
   private var _isClosed = false
 
   def messageFilter(m: Message): Unit = lock.synchronized {
-    if(!requestQueue.isEmpty) requestQueue.dequeue().complete(Success(m))
+    if(!requestQueue.isEmpty) requestQueue.dequeue().success(m)
     else messageQueue += m
   }
 
@@ -44,10 +44,20 @@ abstract class AsyncMessageBuffer(buff: AsyncReadBuffer, parser: MessageParser)
   // This method will starts the AsyncBuffer in that it now constantly queries the buffer for messages
   def run() {
     parser.parseBuffer(buff).onComplete {
-      case Success(m) =>  messageFilter(m); run()
-      case Failure(t) =>  if(onFailure(t)) run() // let onFailure determine if we should close down
+      case Success(m) =>
+        if(!isClosed()) {
+          messageFilter(m)
+          run()
+        }
+
+      case Failure(t: AsynchronousCloseException) => // The connection has been closed
+        if(!isClosed()) close()
+
+      case Failure(t) => if(onFailure(t)) run() // let onFailure determine if we should close down
     }
   }
+
+  override def toString() = "MessageBuffer(" + messageQueue + ")"
 
   def close() = lock.synchronized {
     _isClosed = true

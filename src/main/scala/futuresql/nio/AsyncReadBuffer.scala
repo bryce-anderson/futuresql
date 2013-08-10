@@ -65,16 +65,16 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
 
     val p = Promise[Array[Byte]]
 
-    def fillBytes(written: Int) {
-      if(buff.remaining >= size - written) { // Already have enough! Good.
-        buff.get(bytes, written, size - written)
+    def fillBytes(read: Int) {
+      if(buff.remaining >= size - read) { // Already have enough! Good.
+        buff.get(bytes, read, size - read)
         p.complete(Success(bytes))
       } else {
         val remaining = buff.remaining()
-        buff.get(bytes, written, remaining)  // Write what we have
+        buff.get(bytes, read, remaining)  // Write what we have
         fillBuffer.onComplete {
           case Failure(t) => p.complete(Failure(t))
-          case Success(_) => fillBytes(written + remaining)
+          case Success(_) => fillBytes(read + remaining)
         }
       }
     }
