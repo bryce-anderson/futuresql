@@ -29,10 +29,10 @@ object Main {
                                            conf.getString("db.address"),
                                            conf.getInt("db.port"),
                                            conf.getString("db.dbname"),
-                                                  10)
+                                                  1)
 
-    val enums = 0 until 50 map { _ =>
-      pool.query(selectQuery).enumerate
+    val enums = 0 until 1 map { _ =>
+      pool.preparedQuery(selectQuery).enumerate
     } reduceLeft ( _ >>> _ )
 
     var count = 0
@@ -42,8 +42,8 @@ object Main {
 
     Await.result(f, 4.seconds)
 
-    //println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
-    //println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
+    println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
+    println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
 
     pool.close()
   }

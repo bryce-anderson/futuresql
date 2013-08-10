@@ -3,7 +3,7 @@ package futuresql.postgres
 import play.api.libs.iteratee.{Enumerator, Input}
 import futuresql.main.{BufferingEnumerator, MessageBuffer, Message, RowIterator}
 import scala.util.{Failure, Success}
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{Promise, Future, ExecutionContext}
 import futuresql.nio.AsyncWriteBuffer
 
 /**
@@ -21,6 +21,8 @@ trait QueryPipeline {
   def cancelQuery(): Unit
 
   def onFinished(): Unit
+
+  protected def onFailure(msg: String, t: Throwable)
 
   def log(msg: String): Unit
 
@@ -51,7 +53,7 @@ trait QueryPipeline {
 
         case Success(m: Message) => onUnknownMessage(m)
 
-        case Failure(t) =>  throw new Exception("Failed to parse.", t)
+        case Failure(t) =>  onFailure("Failed to parse.", t)
       }
     }
 

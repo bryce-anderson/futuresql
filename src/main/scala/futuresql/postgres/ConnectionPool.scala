@@ -9,6 +9,7 @@ import java.nio.channels.{AsynchronousSocketChannel, AsynchronousCloseException}
 import java.net.InetSocketAddress
 import java.util.concurrent.ExecutionException
 import java.io.IOException
+import futuresql.postgres.types.QueryParam
 
 /**
  * @author Bryce Anderson
@@ -30,7 +31,6 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
       def log(msg: String) = pool.log(msg, num)
 
       def onDeath(conn: Connection, t: Throwable): Any = connectionError(conn, t)
-
 
       def newChannel(): AsynchronousSocketChannel = {
         try {
@@ -60,8 +60,11 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
 
   protected def connectionError(conn: Connection, t: Throwable): Unit = if (!isClosed) {
     println("DEBUG: Caught error: " + t + ". Restarting connection.")
-    t.printStackTrace()
-    recycleConnection(conn)
+    //t.printStackTrace()
+    //recycleConnection(conn)
+    conn.close()
+    recycleConnection(makeConnection(-1))
+
   }
 
   def isClosed() = _isClosed
@@ -87,6 +90,16 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
     }
   }
 
-  def query(query: String, params: String*): QueryResult = lock.synchronized (???)
+  def preparedQuery(query: String, params: QueryParam*): QueryResult = lock.synchronized {
+    if(_isClosed) sys.error("Attempted to submit inQuery to closed connection pool.")
+    if(!connectionQueue.isEmpty) {
+      val conn = connectionQueue.dequeue()
+      new QueryResult(conn.preparedQuery(query, params))
+    } else {
+      val p = Promise[Connection]
+      queryQueue += p
+      new QueryResult(p.future.flatMap{ conn => conn.query(query)})
+    }
+  }
 
 }

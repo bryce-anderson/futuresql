@@ -18,22 +18,29 @@ trait SimpleQueryPipeline extends QueryPipeline { self =>
     val p = Promise[Enumerator[RowIterator]]
     writebuff.writeBuffer(q.toBuffer).onComplete {
       case Success(_) =>
-        messagebuff.getMessage().map {
-          case EmptyQueryResponse =>
+        messagebuff.getMessage().onComplete {
+          case Success(EmptyQueryResponse) =>
             p.success(Enumerator())
             onFinished()
 
-          case CommandComplete(msg) =>
+          case Success(CommandComplete(msg)) =>
             log("Command complete: " + msg)
             onFinished()
             p.success(Enumerator())
 
-          case desc: RowDescription =>  // Getting data. Start to read
-            val enum = runRows(desc)
-            p.success(enum)
+          case Success(desc: RowDescription) =>  // Getting data. Start to read
+            p.success(runRows(desc))
 
-          case other: Message =>
-            log("Found unexpected message: " + other); self.onUnknownMessage(other)
+          case Success(other: Message) =>
+            log("Found unexpected message: " + other)
+          // TODO: this needs reworking to be more consistent.
+            p.failure(new Exception("Found unexpected message: " + other))
+            self.onUnknownMessage(other)
+
+          case Failure(t) =>
+            p.failure(t)
+            onFailure("Failed to get query response message", t)
+
         }
 
       case Failure(t) => p.complete(Failure(t))

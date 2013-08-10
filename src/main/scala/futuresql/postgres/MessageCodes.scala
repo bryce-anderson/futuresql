@@ -16,6 +16,7 @@ object MessageCodes {
   val RowDescription      = 'T'
   val CommandComplete     = 'C'
   val DataRow             = 'D'
+  val Describe            = 'D'
   val Terminate           = 'X'
   val Parse               = 'P'
   val ParseComplete       = '1'
@@ -24,4 +25,5 @@ object MessageCodes {
   val Bind                = 'B'
   val BindComplete        = '2'
   val Execute             = 'E'
+  val Sync                = 'S'
 }

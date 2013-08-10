@@ -30,31 +30,6 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
     p.future
   }
 
-  def getString(): Future[String] = {
-    val p = Promise[String]
-    val str = new StringBuilder
-    def addChar() {
-      if (buff.remaining() > 0) { // Have data. Start to fill it
-        val chr = buff.get().toChar
-        if (chr == '\0') { // Finished
-          p.tryComplete(Success(str.result()))
-        } else {
-          str.append(chr)
-          addChar()
-        }
-      } else { // Need to fill the buffer
-        fillBuffer.onComplete {
-          case Failure(t) => p.complete(Failure(t))
-          case Success(_) => addChar()
-        }
-      }
-    }
-
-    //sync(addChar(), p.future)
-    addChar()
-    p.future
-  }
-
   def getInt(): Future[Int] = {
     val p = Promise[Int]
     if (buff.remaining() >= 4) {
@@ -104,7 +79,6 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
       }
     }
 
-    //sync(fillBytes(0), p.future)
     fillBytes(0)
     p.future
   }

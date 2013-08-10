@@ -14,6 +14,7 @@ trait QueryParam {
   def writeBuffer(buff: ByteBuffer)
   def wireSize: Int
   def formatCode: Short // 0 = text, 1 = binary
+  def strRepr: String
 
   def tooBuffer = {
     val buff = newBuff(wireSize)
@@ -21,6 +22,8 @@ trait QueryParam {
     buff.flip()
     buff
   }
+
+  override def toString() = s"QueryParam( $strRepr )"
 }
 
 object QueryParam {
@@ -34,6 +37,13 @@ object QueryParam {
 
     def wireSize: Int = in.length + 2
 
+    def strRepr: String = {
+      val buff = new StringBuilder
+      in.foreach { b => buff.append("%02X".format(b)) }
+      buff.result()
+    }
+
+    // 0 = text, 1 = binary
     def formatCode: Short = 0
   }
 
@@ -45,14 +55,20 @@ object QueryParam {
     def writeBuffer(buff: ByteBuffer) {
       putString(buff, in)
     }
+
+    // 0 = text, 1 = binary
+    def strRepr: String = in
   }
 
-  implicit def anyToParam[A](in: A) = new QueryParam {
-    private lazy val bytes = in.toString.getBytes
-    val wireSize = bytes.length
-    def formatCode = 0
-    def writeBuffer(buff: ByteBuffer) {
-      buff.put(bytes)
-    }
-  }
+//  implicit def anyToParam[A](in: A) = new QueryParam {
+//    private lazy val bytes = in.toString.getBytes
+//    val wireSize = bytes.length
+//    def formatCode = 0
+//    def writeBuffer(buff: ByteBuffer) {
+//      buff.put(bytes)
+//    }
+//
+//    // 0 = text, 1 = binary
+//    def strRepr: String = in.toString
+//  }
 }

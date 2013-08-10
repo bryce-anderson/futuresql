@@ -19,11 +19,28 @@ sealed abstract class WritablePostgresMessage(code: Char) extends PostgresMessag
 
 sealed abstract class Auth(size: Int, authtype: Int) extends PostgresMessage(MessageCodes.Authorize)
 
-case object Terminate extends WritablePostgresMessage(MessageCodes.Terminate) {
+sealed abstract class SimpleWritableMessage(code: Char) extends WritablePostgresMessage(code) {
   def toBuffer = {
     val buff = newBuff(5)
     buff.put(code.toByte)
     buff.putInt(4)
+    buff.flip()
+    buff
+  }
+}
+
+case object Terminate extends SimpleWritableMessage(MessageCodes.Terminate)
+
+case object Sync extends SimpleWritableMessage(MessageCodes.Sync)
+
+case class Describe(name: String, descType: Char) extends WritablePostgresMessage(MessageCodes.Describe) {
+  def toBuffer: ByteBuffer = {
+    val size = 4 + (name.length + 1) + 1
+    val buff = newBuff(size + 1)
+    buff.put(code.toByte)
+    buff.putInt(size)
+    buff.put(descType.toByte)
+    putString(buff, name)
     buff.flip()
     buff
   }
@@ -36,7 +53,6 @@ case object AuthOK extends Auth(8, 0)
 case class AuthMD5(salt: Array[Byte]) extends Auth(12, 5)
 
 case class ErrorResponse(msg: String, errorcode: Byte) extends WritablePostgresMessage(MessageCodes.ErrorResponse) {
-
   def toBuffer: ByteBuffer = {
     val buff = newBuff(msg.length + 7) //  msgcode: 1, size: 4, error code: 1, str, null char: 1
     putString(buff, msg)
@@ -120,12 +136,14 @@ case class Execute(portal: String = "", maxRows: Int = 0) extends WritablePostgr
 
 case object BindComplete extends PostgresMessage(MessageCodes.BindComplete)
 
-case class Bind(portal: String = "", statement: String = "")(params: QueryParam*) extends WritablePostgresMessage(MessageCodes.Bind) {
+case class Bind(portal: String = "", statementName: String = "")(params: Seq[QueryParam]) extends WritablePostgresMessage(MessageCodes.Bind) {
   def toBuffer: ByteBuffer = {
+
+    println("Params: " + params.foldLeft("")(_ + ", " + _))
 
     val len = 4 +
               portal.length + 1 +
-              statement.length + 1 +
+              statementName.length + 1 +
               2 + params.length*2 +        // Format codes
               2 + params.foldLeft(0){ (i, p) => p.wireSize + 4 + i} + // The param fields and their lengths
               2   // the length of the format codes for return types
@@ -134,7 +152,7 @@ case class Bind(portal: String = "", statement: String = "")(params: QueryParam*
     buff.put(MessageCodes.Bind.toByte)
     buff.putInt(len)  // Message length
     putString(buff, portal)
-    putString(buff, statement)
+    putString(buff, statementName)
 
     // Set binary or not
     buff.putShort(params.length.asInstanceOf[Short])

@@ -16,6 +16,7 @@ import futuresql.nio.{AsyncWriteBuffer, AsyncReadBuffer}
 import futuresql.main._
 import scala.util.Failure
 import scala.util.Success
+import futuresql.postgres.types.QueryParam
 
 /**
  * @author Bryce Anderson
@@ -148,23 +149,23 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     status
   }
 
-  private def recycleConnection() {
+  private def cleanAndRecycle() {
     messagebuff.getMessage().onComplete {
       case Success(ReadyForQuery(_)) => recycleConnection(self)
       case Success(m: Message) =>
-        log("Cleaned messaage:" + m)
-        recycleConnection()
+        log("Cleaned message:" + m)
+        cleanAndRecycle()
 
       case Failure(t) => onDeath(self, t)
     }
   }
 
-  private def onFailedQuery(msg: String, t: Throwable) {
-    val buff = new StringWriter()
-    if (t != null) t.printStackTrace() // TODO: Do this better.
-    log(s"Query failed: $msg.")
-    recycleConnection()
-  }
+//  private def onFailedQuery(msg: String, t: Throwable) {
+//    val buff = new StringWriter()
+//    if (t != null) t.printStackTrace() // TODO: Do this better.
+//    log(s"Query failed: $msg.")
+//    cleanConnection()
+//  }
 
   private def cancelQuery() {
     log("Canceling Query.")
@@ -178,35 +179,41 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
       })
     } catch {
       case t: Throwable => // Don't care
-    } finally  recycleConnection()
+    } finally  cleanAndRecycle()
   }
 
   def query(inQuery: String): Future[Enumerator[RowIterator]] = {
-    val q = SimpleQuery(inQuery)
-    val p = Promise[Enumerator[RowIterator]]
-    writebuff.writeBuffer(q.toBuffer).onComplete {
-      case Success(_) =>
-        val pipeline = new SimpleQueryPipeline {
-          def writebuff = self.writebuff
-          def query = inQuery
-          def messagebuff: MessageBuffer = self.messagebuff
-          def log(msg: String) = self.log(msg)
-          implicit def ec: ExecutionContext = self.ec
-          def cancelQuery() = self.cancelQuery()
-          def onFinished() = self.recycleConnection()
-        }
-
-        val enum = pipeline.run()
-        p.completeWith(enum)
-
-      case Failure(t) => p.complete(Failure(t))
+    val pipeline = new SimpleQueryPipeline {
+      protected def onFailure(msg: String, t: Throwable) {
+        log(msg)
+        self.onDeath(self, t)
+      }
+      def writebuff = self.writebuff
+      def query = inQuery
+      def messagebuff: MessageBuffer = self.messagebuff
+      def log(msg: String) = self.log(msg)
+      implicit def ec: ExecutionContext = self.ec
+      def cancelQuery() = self.cancelQuery()
+      def onFinished() = self.cleanAndRecycle()
     }
 
-    p.future
+    pipeline.run()
   }
 
-  def query(query: String, params: Any*): Future[Enumerator[RowIterator]] = {
-    ???
+  def preparedQuery(query: String, params: Seq[QueryParam]): Future[Enumerator[RowIterator]] = {
+    val pipeline = new PreparedStatementPipeline(query, params) {
+      def onFinished() = self.cleanAndRecycle()
+      def messagebuff: MessageBuffer = self.messagebuff
+      def log(msg: String) = self.log(msg)
+      protected def onFailure(msg: String, t: Throwable) {
+        log(msg)
+        self.onDeath(self, t)
+      }
+      protected implicit def ec: ExecutionContext = self.ec
+      def cancelQuery() = self.cancelQuery()
+      def writebuff: AsyncWriteBuffer = self.writebuff
+    }
+    pipeline.run()
   }
 
   def isClosed() = _isClosed
@@ -214,8 +221,9 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
   def close() {
     _isClosed = true
     log("Closing Channel")
-    writebuff.writeBuffer(Terminate.toBuffer).flatMap( _ => messagebuff.close())
-                .onComplete( _ => channel.close())
+    writebuff.writeBuffer(Terminate.toBuffer)
+             .flatMap( _ => messagebuff.close())
+             .onComplete( _ => channel.close())
   }
 
   def handleUnexpected(msg: Message, p: Promise[_], stage: String) = msg match {

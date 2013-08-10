@@ -16,41 +16,53 @@ import futuresql.main.MessageParser
 class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser {
 
   def parseBuffer(buff: AsyncReadBuffer): Future[PostgresMessage] = {
-    buff.getChar flatMap {code =>
-      code match {
-        case MessageCodes.DataRow => parseDataRow(buff)
-        case MessageCodes.EmptyQueryResponse => parseEmptyQueryResponse(buff)
-        case MessageCodes.ErrorResponse => parseError(buff)
-        case MessageCodes.Authorize => parseAuthorize(buff)
-        case MessageCodes.ParameterStatus => parseParameterStatus(buff)
-        case MessageCodes.BackendKeyData => parseBackendKeyData(buff)
-        case MessageCodes.ReadyForQuery => parseReadyForQuery(buff)
-        case MessageCodes.RowDescription => parseRowDescription(buff)
-        case MessageCodes.CommandComplete => parseCommandComplete(buff)
-        case MessageCodes.NoticeResponse => parseNoticeResponse(buff)
+    buff.getChar.flatMap {
+      case MessageCodes.DataRow => parseDataRow(buff)
+      case MessageCodes.EmptyQueryResponse => parseEmptyQueryResponse(buff)
+      case MessageCodes.ErrorResponse => parseError(buff)
+      case MessageCodes.ParseComplete => parseParseComplete(buff)
+      case MessageCodes.Authorize => parseAuthorize(buff)
+      case MessageCodes.ParameterStatus => parseParameterStatus(buff)
+      case MessageCodes.BackendKeyData => parseBackendKeyData(buff)
+      case MessageCodes.ReadyForQuery => parseReadyForQuery(buff)
+      case MessageCodes.RowDescription => parseRowDescription(buff)
+      case MessageCodes.CommandComplete => parseCommandComplete(buff)
+      case MessageCodes.NoticeResponse => parseNoticeResponse(buff)
+      case MessageCodes.BindComplete => parseBindComplete(buff)
 
-        case _ => buff.getString() flatMap { str =>
-          parseError(s"Cannot parse message with code: $code, ${code.toByte}\nRemaining: " + str)
-        }
+      case code => buff.getNextFullBuffer().flatMap { buff =>
+        val str = new StringBuilder
+        str.append(s"Cannot parse message with code: $code, ${code.toByte}\nRemaining: ")
+        while(buff.remaining() > 0) str.append(buff.get().toChar)
+        parseError(str.result)
       }
+    }
+      .map { m => println("Read message: " + m); m }
+  }
+
+  private def parseBindComplete(buff: AsyncReadBuffer): Future[BindComplete.type] = buff.getInt().map { i =>
+    if(i != 4) sys.error("Wrong size: " + i)
+    BindComplete
+  }
+
+  private def parseNoticeResponse(buff: AsyncReadBuffer): Future[NoticeResponse] = {
+    buff.getNextFullBuffer().map { buff =>
+      val mtype = buff.get()
+      val msg = parseString(buff)
+      NoticeResponse(mtype, msg)
     }
   }
 
-  private def parseNoticeResponse(buff: AsyncReadBuffer): Future[NoticeResponse] = buff.getNextFullBuffer() map { buff =>
-    val mtype = buff.get()
-    val msg = parseString(buff)
-    NoticeResponse(mtype, msg)
+  private def parseParseComplete(buff: AsyncReadBuffer): Future[ParseComplete.type] = buff.getInt() flatMap { size =>
+    if (size != 4) Future.failed(new Exception("Wrong size for ParseComplete message: " + size))
+    else Future.successful(ParseComplete)
   }
 
-  private def parseError(abuff: AsyncReadBuffer): Future[ErrorResponse] = {
-    // Continue to parse
-    abuff.getBuffer(5) flatMap { buff =>
-      val len = buff.getInt
-      val code = buff.get()
-      abuff.getString() map { str =>
-        ErrorResponse(str, code)
-      }
-    }
+  private def parseError(buff: AsyncReadBuffer): Future[ErrorResponse] = buff.getNextFullBuffer().map { buff =>
+    val code = buff.get()
+    val strArray = new Array[Byte](buff.remaining() - 1)
+    buff.get(strArray)
+    ErrorResponse(new String(strArray), code)
   }
 
   private def parseEmptyQueryResponse(buff: AsyncReadBuffer): Future[PostgresMessage] = buff.getInt() map { i =>
@@ -73,11 +85,14 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
     }
   }
 
-  private def parseParameterStatus(abuff: AsyncReadBuffer): Future[ParameterStatus] = {
-    for{    i <- abuff.getInt
-        param <- abuff.getString()
-        value <- abuff.getString()
-    } yield ParameterStatus(param, value)
+  private def parseParameterStatus(buff: AsyncReadBuffer): Future[ParameterStatus] = buff.getNextFullBuffer() map { buff =>
+    val param = new StringBuilder
+    val value = new StringBuilder
+    var chr = '\0'
+    while({chr = buff.get().toChar; chr != '\0'})  param.append(chr)
+    while({chr = buff.get().toChar; chr != '\0'})  value.append(chr)
+
+    ParameterStatus(param.result(), value.result())
   }
 
   private def parseBackendKeyData(abuff: AsyncReadBuffer): Future[BackendKeyData] = abuff.getInt flatMap { size =>
@@ -100,11 +115,12 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
     }
   }
 
-  private def parseRowDescription(buff: AsyncReadBuffer): Future[RowDescription] = buff.getNextFullBuffer map { buff =>
-    val fields = buff.getShort
-    val rows = new ListBuffer[Column]
-    0 until fields foreach { i =>
-      val c = Column(BufferUtils.parseString(buff),
+  private def parseRowDescription(buff: AsyncReadBuffer): Future[RowDescription] = {
+    buff.getNextFullBuffer map { buff =>
+      val fields = buff.getShort
+      val rows = new ListBuffer[Column]
+      0 until fields foreach { i =>
+        val c = Column(BufferUtils.parseString(buff),
         {
           val tableid = buff.getInt()
           val colid = buff.getShort
@@ -119,38 +135,40 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
           case 0 => false
           case e => throw error(s"Invalid format. Code: $e")
         }
-      )
-      rows.append(c)
-    }
-    RowDescription(rows.result())
-  }
-
-  private def parseDataRow(buff: AsyncReadBuffer): Future[DataRow] = buff.getNextFullBuffer() map { buff =>
-    val columns = buff.getShort()
-    val data = new Array[Array[Byte]](columns)
-    0 until columns foreach { i =>
-      val size = buff.getInt()
-      if (size < -1) throw error("Recieved invalid size: " + size)
-      else if (size == -1 || size == 0) { // Null result
-        data(i) = new Array[Byte](0)
-      } else {
-        data(i) = new Array[Byte](size)
-        buff.get(data(i))
+        )
+        rows.append(c)
       }
+      RowDescription(rows.result())
     }
-
-    DataRow(data)
   }
 
-  private def parseParseComplete(buff: AsyncReadBuffer): Future[PostgresMessage] = buff.getInt() map { i =>
-    if (i != 4) throw error(s"ParseComplete has wrong size: $i. Required 4.")
-    else ParseComplete
+  private def parseDataRow(buff: AsyncReadBuffer): Future[DataRow] = {
+    println("Parsing Data Row")
+    buff.getNextFullBuffer() map { buff =>
+      val columns = buff.getShort()
+      val data = new Array[Array[Byte]](columns)
+      0 until columns foreach { i =>
+        val size = buff.getInt()
+        if (size < -1) throw error("Recieved invalid size: " + size)
+        else if (size == -1 || size == 0) { // Null result
+          data(i) = new Array[Byte](0)
+        } else {
+          data(i) = new Array[Byte](size)
+          buff.get(data(i))
+        }
+      }
+
+      DataRow(data)
+    }
   }
 
-  private def parseCommandComplete(buff: AsyncReadBuffer): Future[CommandComplete] =
+  private def parseCommandComplete(buff: AsyncReadBuffer): Future[CommandComplete] = {
+    println("Parsing CommandComplete")
     buff.getNextFullBuffer() map { buff =>
       CommandComplete(parseString(buff))
     }
+  }
+
 
   private def parseError(msg: String) = Future.failed[Nothing](error(msg))
   private def error(msg: String) = new Exception(msg)
