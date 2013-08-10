@@ -179,8 +179,7 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
 
   def query(inQuery: String): Future[Enumerator[RowIterator]] = {
     val pipeline = new SimpleQueryPipeline {
-      protected def onFailure(msg: String, t: Throwable) {
-        log(msg)
+      protected def onFailure(t: Throwable) {
         self.onDeath(self, t)
       }
       def writebuff = self.writebuff
@@ -200,8 +199,7 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
       def onFinished() = self.cleanAndRecycle()
       def messagebuff: MessageBuffer = self.messagebuff
       def log(msg: String) = self.log(msg)
-      protected def onFailure(msg: String, t: Throwable) {
-        log(msg)
+      protected def onFailure(t: Throwable) {
         self.onDeath(self, t)
       }
       protected implicit def ec: ExecutionContext = self.ec

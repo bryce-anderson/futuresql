@@ -3,14 +3,13 @@ package futuresql.postgres
 import scala.concurrent.{Future, Promise, ExecutionContext}
 import scala.collection.mutable
 import play.api.libs.iteratee.Enumerator
-import scala.util.{Random, Success}
 import futuresql.main.{QueryResult, RowIterator}
-import java.nio.channels.{AsynchronousSocketChannel, AsynchronousCloseException}
+import java.nio.channels.{AsynchronousChannelGroup, AsynchronousSocketChannel, AsynchronousCloseException}
 import java.net.InetSocketAddress
-import java.util.concurrent.ExecutionException
+import java.util.concurrent.{TimeUnit, ExecutionException}
 import java.io.IOException
 import futuresql.postgres.types.QueryParam
-import futuresql.postgres.Connection
+import scala.concurrent.forkjoin.ForkJoinPool
 
 /**
  * @author Bryce Anderson
@@ -19,10 +18,12 @@ import futuresql.postgres.Connection
 class ConnectionPool(user: String, passwd: String, address: String, port: Int, db: String, size: Int = 20, options: Iterable[String] = Nil)
                     (implicit ec: ExecutionContext) { pool =>
 
+  // TODO: can we manage the thread pool better?
+  private val group = AsynchronousChannelGroup.withThreadPool(new ForkJoinPool(Runtime.getRuntime.availableProcessors()))
   private var _isClosed = false
   private val queryQueue = new mutable.Queue[Promise[Connection]]()
   private val connectionQueue = new mutable.Queue[Connection]()
-  protected val lock = new AnyRef
+  private val lock = new AnyRef
 
   def log(msg: String, connection: Int): Unit = println(s"Connection $connection: DEBUG: $msg")
 
@@ -35,7 +36,7 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
 
       def newChannel(): AsynchronousSocketChannel = {
         try {
-          val channel = AsynchronousSocketChannel.open()
+          val channel = AsynchronousSocketChannel.open(group)
           channel.connect(new InetSocketAddress(address, port)).get()
           channel
         } catch {
@@ -55,7 +56,7 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
     if(isClosed()) {
       conn.close()
     }else if (!queryQueue.isEmpty) {
-      queryQueue.dequeue().complete(Success(conn))
+      queryQueue.dequeue().success(conn)
     } else {
       connectionQueue += conn
     }
@@ -78,6 +79,10 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
     connectionQueue.foreach( c => c.close())
     queryQueue.clear()
     connectionQueue.clear()
+
+    // Shutdown the io group
+    if(!group.isShutdown()) group.shutdown()
+    group.awaitTermination(1, TimeUnit.SECONDS)
   }
 
   private def runQuery(f: Connection => Future[Enumerator[RowIterator]]) = lock.synchronized {

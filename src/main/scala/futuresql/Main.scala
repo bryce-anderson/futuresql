@@ -2,16 +2,20 @@ package futuresql
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import play.api.libs.iteratee.{Enumerator, Iteratee}
+import play.api.libs.iteratee.{Input, Enumerator, Iteratee}
 import futuresql.main.RowIterator
 
+import scala.concurrent.ExecutionContext.Implicits.global
+
 import com.typesafe.config.ConfigFactory
+import scala.util.Random
 
 object Main {
   def main(args: Array[String]) {
     println("Hello world!")
 
     postgresPool()
+
     println("Ending Test program.")
   }
 
@@ -28,10 +32,10 @@ object Main {
                                            conf.getString("db.address"),
                                            conf.getInt("db.port"),
                                            conf.getString("db.dbname"),
-                                                  1)
+                                                  2)
 
-    val enums = 0 until 5 map { _ =>
-      pool.preparedQuery("""select * from users usr where usr.id = $1""", 1).enumerate
+    val enums = 0 until 1 map { _ =>
+      pool.preparedQuery("""select * from users usr where usr.idd = $1""", Random.nextInt(3)).enumerate
       //pool.query(selectQuery).enumerate
     } reduceLeft ( _ >>> _ )
 
@@ -40,12 +44,20 @@ object Main {
       Enumerator.eof |>>
       Iteratee.foreach[RowIterator]{ r => println(s"$count: Found Data: " + r.dataMap); count += 1}
 
+    try {
     Await.result(f, 4.seconds)
+    } catch {
+      case t: Throwable => println("Found exception: " + t)
+    }
 
-//    println(Await.result(pool.query(updateQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
-//    println(Await.result(pool.query(binQuery).enumerate |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
+//    println(Await.result(pool.query(updateQuery).enumerate >>> Enumerator.eof |>> Iteratee.foreach[RowIterator]( i => println("Found " + i)), 2.seconds))
+//    println(Await.result(pool.query(binQuery).enumerate >>> Enumerator.eof |>> Iteratee.foreach[RowIterator]( i => println("Found " + i.dataMap)), 2.seconds))
 
     pool.close()
+  }
+
+  def iterateeTest() {
+    Iteratee.foreach[String](s => println(s)).feed(Input.El("cat")).flatMap(_.run)
   }
 
 }

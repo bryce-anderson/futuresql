@@ -39,7 +39,7 @@ trait SimpleQueryPipeline extends QueryPipeline { self =>
 
           case Failure(t) =>
             p.failure(t)
-            onFailure("Failed to get query response message", t)
+            onFailure(new Exception("Failed to get query response message", t))
 
         }
 

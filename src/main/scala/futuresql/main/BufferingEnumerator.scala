@@ -36,10 +36,13 @@ class BufferingEnumerator[A] private[futuresql](implicit ec: ExecutionContext) e
     val p = Promise[Iteratee[A, B]]
 
     def itFolder(i: Iteratee[A, B], input: Input[A])(step: Step[A, B]) = Future.successful(input match {
-      case Input.EOF => p.complete(Success(i)); i
+      case Input.EOF =>
+        p.complete(Success(i))
+        cont = null
+        i
       case input => step match {
         case Step.Cont(f) => f(input)
-        case _ =>
+        case _ => // Finished.
           cont = null
           p.complete(Success(i))
           i
@@ -51,7 +54,7 @@ class BufferingEnumerator[A] private[futuresql](implicit ec: ExecutionContext) e
       cont = foldGenerator(fi)
     }
 
-    // Now clean out the buffer and set the continuation
+    // Clean out the buffer and set the continuation
     buffer.synchronized {
       val fit = buffer.result().foldLeft(Future.successful(i)){ (i, input) =>
         i.flatMap ( i => i.fold(itFolder(i, input)))

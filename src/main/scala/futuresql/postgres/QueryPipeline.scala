@@ -22,7 +22,7 @@ trait QueryPipeline {
 
   def onFinished(): Unit
 
-  protected def onFailure(msg: String, t: Throwable)
+  protected def onFailure(t: Throwable)
 
   def log(msg: String): Unit
 
@@ -52,7 +52,7 @@ trait QueryPipeline {
 
         case Success(m: Message) => onUnknownMessage(m)
 
-        case Failure(t) =>  onFailure("Failed to parse.", t)
+        case Failure(t) =>  onFailure(t)
       }
     }
 

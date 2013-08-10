@@ -19,9 +19,10 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
     p.future
   }
 
-  private def failAndCleanup(msg: String, t: Throwable, p: Promise[Enumerator[RowIterator]]) {
-    p.failure(new Exception(msg, t))
-    onFailure(msg, t)
+  private def failAndCleanup(t: Throwable, p: Promise[Enumerator[RowIterator]]) {
+    //p.failure(new Exception(msg, t))
+    p.failure(t)
+    onFailure(t)
   }
 
   private def writeQuery(p: Promise[Enumerator[RowIterator]]) {
@@ -57,7 +58,7 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
 
         case Success(ErrorResponse(msg, code)) =>
           val failMsg = s"Failed to execute statement. Code $code: $msg"
-          failAndCleanup(failMsg, new Exception(failMsg), p)
+          failAndCleanup(new Exception(failMsg), p)
 
         case Success(CommandComplete(msg)) =>
           log("Command complete: " + msg)
@@ -66,9 +67,9 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
 
         case Success(m) =>
           val failMsg = s"Failed to execute statement, wrong message: $m"
-          failAndCleanup(failMsg, new Exception(failMsg), p)
+          failAndCleanup(new Exception(failMsg), p)
 
-        case Failure(t) => failAndCleanup("Prepared statement failed to receive Row Description from message buffer.", t, p)
+        case Failure(t) => failAndCleanup(t, p)
       }
     }
 

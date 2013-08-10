@@ -43,17 +43,23 @@ abstract class AsyncMessageBuffer(buff: AsyncReadBuffer, parser: MessageParser)
 
   // This method will starts the AsyncBuffer in that it now constantly queries the buffer for messages
   def run() {
+
+    if (isClosed()) sys.error("tried to run on closed MessageBuffer")
+
     parser.parseBuffer(buff).onComplete {
       case Success(m) =>
         if(!isClosed()) {
           messageFilter(m)
           run()
+        } else {
+          println("DEBUG: Received good message on closed MessageBuffer")
         }
 
       case Failure(t: AsynchronousCloseException) => // The connection has been closed
         if(!isClosed()) close()
 
-      case Failure(t) => if(onFailure(t)) run() // let onFailure determine if we should close down
+      case Failure(t) =>
+        if(onFailure(t)) run() // let onFailure determine if we should close down
     }
   }
 
