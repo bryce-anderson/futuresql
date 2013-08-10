@@ -29,6 +29,7 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
       case MessageCodes.CommandComplete => parseCommandComplete(buff)
       case MessageCodes.NoticeResponse => parseNoticeResponse(buff)
       case MessageCodes.BindComplete => parseBindComplete(buff)
+      case MessageCodes.ParameterDescription => parseParameterDescription(buff)
 
       case code => buff.getNextFullBuffer().flatMap { buff =>
         val str = new StringBuilder
@@ -37,7 +38,19 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
         parseError(str.result)
       }
     }
-      .map { m => println("Read message: " + m); m }
+      //.map { m => println("Read message: " + m); m }
+  }
+
+  private def parseParameterDescription(buff: AsyncReadBuffer): Future[ParameterDescription] = {
+    buff.getNextFullBuffer().map { buff =>
+      var len = buff.getShort.asInstanceOf[Int]
+      val oids = new ListBuffer[Int]
+      while(len > 0) {
+        oids += buff.getInt
+        len -= 1
+      }
+      ParameterDescription(oids.result())
+    }
   }
 
   private def parseBindComplete(buff: AsyncReadBuffer): Future[BindComplete.type] = buff.getInt().map { i =>
@@ -85,14 +98,16 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
     }
   }
 
-  private def parseParameterStatus(buff: AsyncReadBuffer): Future[ParameterStatus] = buff.getNextFullBuffer() map { buff =>
-    val param = new StringBuilder
-    val value = new StringBuilder
-    var chr = '\0'
-    while({chr = buff.get().toChar; chr != '\0'})  param.append(chr)
-    while({chr = buff.get().toChar; chr != '\0'})  value.append(chr)
+  private def parseParameterStatus(buff: AsyncReadBuffer): Future[ParameterStatus] = {
+    buff.getNextFullBuffer() map { buff =>
+      val param = new StringBuilder
+      val value = new StringBuilder
+      var chr = '\0'
+      while({chr = buff.get().toChar; chr != '\0'})  param.append(chr)
+      while({chr = buff.get().toChar; chr != '\0'})  value.append(chr)
 
-    ParameterStatus(param.result(), value.result())
+      ParameterStatus(param.result(), value.result())
+    }
   }
 
   private def parseBackendKeyData(abuff: AsyncReadBuffer): Future[BackendKeyData] = abuff.getInt flatMap { size =>
@@ -143,7 +158,6 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
   }
 
   private def parseDataRow(buff: AsyncReadBuffer): Future[DataRow] = {
-    println("Parsing Data Row")
     buff.getNextFullBuffer() map { buff =>
       val columns = buff.getShort()
       val data = new Array[Array[Byte]](columns)
@@ -163,7 +177,6 @@ class PostgresMessageParser(implicit ec: ExecutionContext) extends MessageParser
   }
 
   private def parseCommandComplete(buff: AsyncReadBuffer): Future[CommandComplete] = {
-    println("Parsing CommandComplete")
     buff.getNextFullBuffer() map { buff =>
       CommandComplete(parseString(buff))
     }

@@ -42,7 +42,6 @@ trait QueryPipeline {
           else cancelQuery()
 
         case Success(CommandComplete(msg)) =>
-          log("Command complete: " + msg)
           pusher(Input.EOF)
           onFinished()
 

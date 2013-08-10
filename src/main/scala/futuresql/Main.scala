@@ -31,7 +31,7 @@ object Main {
                                            conf.getString("db.dbname"),
                                                   1)
 
-    val enums = 0 until 1 map { _ =>
+    val enums = 0 until 10 map { _ =>
       pool.preparedQuery(selectQuery).enumerate
     } reduceLeft ( _ >>> _ )
 

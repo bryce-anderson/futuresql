@@ -1,6 +1,6 @@
 package futuresql.postgres
 
-import futuresql.main.{RowIterator, MessageBuffer}
+import futuresql.main.{Message, RowIterator, MessageBuffer}
 import play.api.libs.iteratee.Enumerator
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -27,97 +27,52 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
   private def writeQuery(p: Promise[Enumerator[RowIterator]]) {
     val parseStatement = Parse(query)   // Don't name these yet
     writebuff.writeBuffer(parseStatement.toBuffer)
-      //.map( i => writebuff.writeBuffer(Describe("", 'S').toBuffer))
+      .map{ _ => writebuff.writeBuffer(Bind()(params).toBuffer) }
+      .map( _ => writebuff.writeBuffer(Describe("", 'S').toBuffer))
+      .map{ _ => writebuff.writeBuffer(Execute().toBuffer) }
       .map{ _ => writebuff.writeBuffer(Sync.toBuffer)}
-      .onComplete {
-      case Success(i) =>
-        messagebuff.getMessage().onComplete{
-          case Success(ParseComplete) =>
-            messagebuff.getMessage().onComplete{
-              case Success(ReadyForQuery(_)) => bindStatement(p)
-              case Success(m) =>
-                val failmsg = "Failed to get ready for query. Found message " + m
-                failAndCleanup(failmsg, new Exception(failmsg), p)
-
-              case Failure(t) =>
-                val failmsg = "Failed to get ready for query. Found exception."
-                failAndCleanup(failmsg, new Exception(failmsg, t), p)
-            }
-
-          case Success(ErrorResponse(msg, code)) =>
-            val failmsg = s"Prepared statement failed to with code $code: $msg"
-            failAndCleanup(failmsg, new Exception(failmsg), p)
-
-          case Failure(t) =>
-            failAndCleanup("Prepared statement failed to receive message from messagebuffer.", t, p)
-
-        }
-      case Failure(t) =>
-        failAndCleanup("Prepared statement failed on output buffer during inQuery parsing.", t, p)
-    }
+      .onComplete{ _ => finish(p)}
   }
 
-  private def bindStatement(p: Promise[Enumerator[RowIterator]]) {
-    val bind = Bind()(params)
-    writebuff.writeBuffer(bind.toBuffer)
-      .map{ _ => writebuff.writeBuffer(Sync.toBuffer)}
-      .onComplete {
-      case Success(i) =>
-        messagebuff.getMessage().onComplete {
-          case Success(BindComplete) =>
-            messagebuff.getMessage().onComplete {
-              case Success(ReadyForQuery(_)) => executeStatement(p)
-              case Success(m) => ???
-              case Failure(t) => ???
-            }
+  private def finish(p: Promise[Enumerator[RowIterator]]) {
 
-          case Success(ErrorResponse(msg, code)) =>
-            val failmsg = s"Prepared statement failed to with code $code: $msg"
-            failAndCleanup(failmsg, null, p)
+    var pdesc: ParameterDescription = null
 
-          case Success(m) =>
-            val failmsg = s"Unknown message type: $m"
-            failAndCleanup(failmsg, null, p)
+    def getResponses() {
+      messagebuff.getMessage().onComplete {
+        case Success(ParseComplete) => getResponses()
 
-          case Failure(t) =>
-            failAndCleanup("Prepared statement failed to receive message from messagebuffer.", t, p)
-        }
+        case Success(desc: ParameterDescription) =>
+          pdesc = desc
+          getResponses()
 
-      case Failure(t) =>
-        failAndCleanup("Prepared statement failed on output buffer during statement binding.", t, p)
+        case Success(BindComplete) => getResponses()
+
+        case Success(desc: RowDescription) =>
+          p.success(runRows(desc))
+
+        case Success(EmptyQueryResponse) =>
+          p.success(Enumerator())
+          onFinished()
+
+        case Success(ErrorResponse(msg, code)) =>
+          val failMsg = s"Failed to execute statement. Code $code: $msg"
+          failAndCleanup(failMsg, new Exception(failMsg), p)
+
+        case Success(CommandComplete(msg)) =>
+          log("Command complete: " + msg)
+          onFinished()
+          p.success(Enumerator())
+
+        case Success(m) =>
+          val failMsg = s"Failed to execute statement, wrong message: $m"
+          failAndCleanup(failMsg, new Exception(failMsg), p)
+
+        case Failure(t) => failAndCleanup("Prepared statement failed to receive Row Description from message buffer.", t, p)
+      }
     }
-  }
 
-  private def executeStatement(p: Promise[Enumerator[RowIterator]]) {
-    val exec = Execute()
-    writebuff.writeBuffer(exec.toBuffer) onComplete  {
-      case Success(i) => // Now we need to consume the rows
-        messagebuff.getMessage().onComplete {
-          case Success(desc: RowDescription) =>
-            p.success(runRows(desc))
-          // Finish the statementName
-            writebuff.writeBuffer(Sync.toBuffer)
-
-          case Success(EmptyQueryResponse) =>
-              p.success(Enumerator())
-              onFinished()
-
-          case Success(ErrorResponse(msg, code)) =>
-            val failMsg = s"Failed to execute statement. Code $code: $msg"
-            failAndCleanup(failMsg, new Exception(failMsg), p)
-
-          case Success(CommandComplete(msg)) =>
-            log("Command complete: " + msg)
-            onFinished()
-            p.success(Enumerator())
-
-          case Success(m) =>
-            val failMsg = s"Failed to execute statement, wrong message: $m"
-            failAndCleanup(failMsg, new Exception(failMsg), p)
-
-          case Failure(t) => failAndCleanup("Prepared statement failed to receive Row Description from message buffer.", t, p)
-        }
-    }
+    getResponses()
   }
 
 }

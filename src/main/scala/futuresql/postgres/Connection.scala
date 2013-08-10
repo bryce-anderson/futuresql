@@ -160,13 +160,6 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     }
   }
 
-//  private def onFailedQuery(msg: String, t: Throwable) {
-//    val buff = new StringWriter()
-//    if (t != null) t.printStackTrace() // TODO: Do this better.
-//    log(s"Query failed: $msg.")
-//    cleanConnection()
-//  }
-
   private def cancelQuery() {
     log("Canceling Query.")
     try {

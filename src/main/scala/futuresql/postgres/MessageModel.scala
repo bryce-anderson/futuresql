@@ -46,6 +46,8 @@ case class Describe(name: String, descType: Char) extends WritablePostgresMessag
   }
 }
 
+case class ParameterDescription(types: List[Int]) extends PostgresMessage(MessageCodes.ParameterDescription)
+
 case class NoticeResponse(mtype: Byte, msg: String) extends PostgresMessage(MessageCodes.NoticeResponse)
 
 case object AuthOK extends Auth(8, 0)
