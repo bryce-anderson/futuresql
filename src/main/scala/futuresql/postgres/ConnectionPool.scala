@@ -29,10 +29,15 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
 
   private def makeConnection(num: Int) = {
 
-    new Connection(Login(user, passwd, db)) {
+    new Connection {
+
+      def login = Login(user, passwd, db)
+
+      def ec = pool.ec
+
       def log(msg: String) = pool.log(msg, num)
 
-      def onDeath(conn: Connection, t: Throwable): Any = connectionError(conn, t)
+      def onDeath(conn: Connection, t: Throwable) = connectionError(conn, t)
 
       def newChannel(): AsynchronousSocketChannel = {
         try {

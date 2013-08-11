@@ -17,6 +17,7 @@ import futuresql.main._
 import scala.util.Failure
 import scala.util.Success
 import futuresql.postgres.types.QueryParam
+import java.sql.SQLRecoverableException
 
 /**
  * @author Bryce Anderson
@@ -27,7 +28,7 @@ import futuresql.postgres.types.QueryParam
 object Connection {
   def newConnection(user: String, passwd: String, address: String, port: Int, db: String)
                    (recycle: Connection => Any = c => println(s"Recycling connection $c") )
-                   (onError: (Connection, Throwable) => Any = (_, _) => Unit)(implicit ec: ExecutionContext) = {
+                   (onError: (Connection, Throwable) => Any = (_, _) => Unit)(implicit inec: ExecutionContext) = {
 
     def simpleFactory(): AsynchronousSocketChannel = {
       try {
@@ -39,13 +40,18 @@ object Connection {
         case io: IOException => throw io
       }
   }
-    val login = Login(user, passwd, db)
-    new Connection(login) { self =>
-      def newChannel(): AsynchronousSocketChannel = simpleFactory()
 
-      def onDeath(conn: Connection, t: Throwable): Any = onError(conn,t)
+    new Connection { self =>
 
-      def recycleConnection(conn: Connection): Any = recycle(conn)
+      def ec = inec
+
+      def login = Login(user, passwd, db)
+
+      def newChannel() = simpleFactory()
+
+      def onDeath(conn: Connection, t: Throwable) = onError(conn,t)
+
+      def recycleConnection(conn: Connection) = recycle(conn)
 
       def log(msg: String) = println(s"Connection $self: DEBUG: $msg")
     }
@@ -53,18 +59,23 @@ object Connection {
 }
 
 
-private[postgres] abstract class Connection(login: Login)(implicit ec: ExecutionContext) { self =>
+private[postgres] trait Connection { self =>
+
+  def login: Login
+
+  implicit def ec: ExecutionContext
 
   def newChannel(): AsynchronousSocketChannel
 
-  def onDeath(conn: Connection, t: Throwable): Any
+  def onDeath(conn: Connection, t: Throwable): Unit
 
   def recycleConnection(conn: Connection): Any
 
   def log(msg: String)
 
-
   private var _isClosed = false
+
+  private val defaultRecycleTries = 10
 
   private val (channel, messagebuff, writebuff) = {
     val channel = newChannel()
@@ -92,7 +103,7 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
 
   val (keyData, options) = startupSeq()
 
-  def onParamStatus(ps: ParameterStatus) { }
+  def onParamStatus(ps: ParameterStatus) { /* TODO: Something should be done here. */ }
 
   private def startupSeq(): (BackendKeyData, List[ParameterStatus]) = {
     val buff = login.initiationBuffer
@@ -113,8 +124,6 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     log("Received authorization: " + auth)
 
     if (!auth.isInstanceOf[AuthOK.type]) sys.error("Authorization failed. Received " + auth)
-
-
 
     def getParams(): Future[(BackendKeyData, List[ParameterStatus])] = {
       val paramsBuff = new ListBuffer[ParameterStatus]
@@ -149,17 +158,19 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     status
   }
 
-  private def cleanAndRecycle() {
-    messagebuff.getMessage().onComplete {
-      case Success(ReadyForQuery(_)) =>
-        recycleConnection(self)
+  private def cleanAndRecycle(tries: Int): Unit = {
+    if(tries > 0) {
+      messagebuff.getMessage().onComplete {
+        case Success(ReadyForQuery(_)) =>
+          recycleConnection(self)
 
-      case Success(m: Message) =>
-        log("Cleaned message:" + m)
-        cleanAndRecycle()
+        case Success(m: Message) =>
+          log("Cleaned message:" + m)
+          cleanAndRecycle(tries - 1)
 
-      case Failure(t) => onDeath(self, t)
-    }
+        case Failure(t) => onDeath(self, t)
+      }
+    } else onDeath(self, new Exception("Cleans exceeded during cleanAndRecycle."))
   }
 
   private def cancelQuery() {
@@ -170,11 +181,13 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
         def completed(result: Integer, attachment: Null) {
           tempChannel.close()
         }
-        def failed(exc: Throwable, attachment: Null) {}
+        def failed(exc: Throwable, attachment: Null) {
+          tempChannel.close()
+        }
       })
     } catch {
       case t: Throwable => // Don't care
-    } finally  cleanAndRecycle()
+    } finally  cleanAndRecycle(500)  // TODO: How many messages to clean on a canceled query?
   }
 
   private abstract class PipelineUtils(val query: String) {
@@ -183,8 +196,14 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     def log(msg: String)            = self.log(msg)
     def ec: ExecutionContext        = self.ec
     def cancelQuery()               = self.cancelQuery()
-    def onFinished()                = self.cleanAndRecycle()
-    def onFailure(t: Throwable)     = self.onDeath(self, t)
+    def onFinished()                = self.cleanAndRecycle(defaultRecycleTries)
+    def onFailure(t: Throwable)     = t match {
+      case t: SQLRecoverableException =>
+        log("Caught recoverable exception: " + t)
+        cleanAndRecycle(defaultRecycleTries)
+
+      case t => self.onDeath(self, t)
+    }
   }
 
   def query(query: String): Future[Enumerator[RowIterator]] = {

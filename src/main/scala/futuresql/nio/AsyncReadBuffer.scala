@@ -33,29 +33,23 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
   def getInt(): Future[Int] = {
     val p = Promise[Int]
     if (buff.remaining() >= 4) {
-      p.complete(Success(buff.getInt))
+      p.success(buff.getInt)
     } else { p.completeWith(getBuffer(4).map { buff => buff.getInt}) }
 
     p.future
   }
 
   def getByte() : Future[Byte] = {
-    val p = Promise[Byte]
-
-    def getByte() {
-      if (buff.remaining() >= 1) {
-        p.complete(Success(buff.get))
-      } else {
-        fillBuffer.onComplete {
-          case Failure(t) => p.complete(Failure(t))
-          case Success(_) => getByte()
-        }
+    if (buff.remaining() >= 1) {
+        Future.successful(buff.get)
+    } else {
+      val p = Promise[Byte]
+      fillBuffer.onComplete {
+        case Failure(t) => p.failure(t)
+        case Success(_) => p.completeWith(getByte())
       }
+      p.future
     }
-
-    //sync(getByte(), p.future)
-    getByte()
-    p.future
   }
 
   def getChar(): Future[Char] = getByte().map(_.toChar)
@@ -68,7 +62,7 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
     def fillBytes(read: Int) {
       if(buff.remaining >= size - read) { // Already have enough! Good.
         buff.get(bytes, read, size - read)
-        p.complete(Success(bytes))
+        p.success(bytes)
       } else {
         val remaining = buff.remaining()
         buff.get(bytes, read, remaining)  // Write what we have
@@ -93,11 +87,9 @@ class AsyncReadBuffer(channel: AsynchronousSocketChannel, size: Int = 10280)(imp
 
   def dumpBuff() = {
     val b = new StringBuilder
-    println("Remaining buffer: " + buff.remaining())
     while(buff.remaining() > 0) b.append(buff.get().toChar)
     b.result
   }
 
   def remaining() = buff.remaining()
-
 }
