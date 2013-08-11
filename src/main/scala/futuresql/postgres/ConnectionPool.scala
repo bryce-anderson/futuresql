@@ -55,7 +55,7 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
   protected def recycleConnection(conn: Connection): Unit = lock.synchronized {
     if(isClosed()) {
       conn.close()
-    }else if (!queryQueue.isEmpty) {
+    } else if (!queryQueue.isEmpty) {
       queryQueue.dequeue().success(conn)
     } else {
       connectionQueue += conn
@@ -73,8 +73,8 @@ class ConnectionPool(user: String, passwd: String, address: String, port: Int, d
 
   def isClosed() = _isClosed
 
-  def close(): Unit = lock.synchronized {
-    _isClosed = true
+  def close(): Unit = {
+    lock.synchronized{ _isClosed = true }
     queryQueue.foreach { p => p.tryFailure(new AsynchronousCloseException)}
     connectionQueue.foreach( c => c.close())
     queryQueue.clear()

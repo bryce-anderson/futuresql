@@ -5,6 +5,7 @@ import futuresql.main.{BufferingEnumerator, MessageBuffer, Message, RowIterator}
 import scala.util.{Failure, Success}
 import scala.concurrent.{Promise, Future, ExecutionContext}
 import futuresql.nio.AsyncWriteBuffer
+import java.sql.SQLRecoverableException
 
 /**
  * @author Bryce Anderson
@@ -28,9 +29,14 @@ trait QueryPipeline {
 
   def run(): Future[Enumerator[RowIterator]]
 
+  protected def failAndCleanup(t: Throwable, p: Promise[Enumerator[RowIterator]]) {
+    p.failure(t)
+    onFailure(t)
+  }
+
   def onUnknownMessage(m: Message) {
     log("Found unexpected message: " + m)
-    sys.error("Don't know how to respond to message: " + m)
+    onFailure(new SQLRecoverableException("Don't know how to respond to Postgresql message: " + m))
   }
 
   def runRows(desc: RowDescription): Enumerator[RowIterator] = {
@@ -48,7 +54,7 @@ trait QueryPipeline {
         case Success(ErrorResponse(msg, code)) =>
           log(s"Received error code $code: $msg")
           pusher(Input.EOF)
-          onFinished()
+          onFailure(new SQLRecoverableException(s"Error during enumeration, code $code: $msg"))
 
         case Success(m: Message) => onUnknownMessage(m)
 

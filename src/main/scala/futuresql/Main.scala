@@ -15,7 +15,7 @@ object Main {
     println("Hello world!")
 
     postgresPool()
-
+    Thread.sleep(300)
     println("Ending Test program.")
   }
 
@@ -45,7 +45,7 @@ object Main {
       Iteratee.foreach[RowIterator]{ r => println(s"$count: Found Data: " + r.dataMap); count += 1}
 
     try {
-    Await.result(f, 4.seconds)
+      Await.result(f, 4.seconds)
     } catch {
       case t: Throwable => println("Found exception: " + t)
     }

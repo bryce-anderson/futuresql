@@ -1,9 +1,10 @@
 package futuresql.postgres
 
 import play.api.libs.iteratee.Enumerator
-import futuresql.main.{Message, MessageBuffer, RowIterator}
-import scala.concurrent.{ExecutionContext, Promise, Future}
+import futuresql.main.{Message, RowIterator}
+import scala.concurrent.{Promise, Future}
 import scala.util.{Failure, Success}
+import java.sql.SQLRecoverableException
 
 /**
  * @author Bryce Anderson
@@ -30,6 +31,10 @@ trait SimpleQueryPipeline extends QueryPipeline { self =>
 
           case Success(desc: RowDescription) =>  // Getting data. Start to read
             p.success(runRows(desc))
+
+          case Success(ErrorResponse(msg, code)) =>
+            val failMsg = s"Failed to execute statement. Code $code: $msg"
+            failAndCleanup(new SQLRecoverableException(failMsg), p)
 
           case Success(other: Message) =>
             log("Found unexpected message: " + other)

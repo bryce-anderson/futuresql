@@ -6,23 +6,22 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 import futuresql.nio.AsyncWriteBuffer
 import futuresql.postgres.types.QueryParam
+import java.sql.SQLRecoverableException
 
 /**
  * @author Bryce Anderson
  *         Created on 8/1/13
  */
-abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])(implicit ec: ExecutionContext) extends QueryPipeline {
+trait PreparedStatementPipeline extends QueryPipeline {
+
+  def query: String
+  def params: Seq[QueryParam]
+  implicit def ec: ExecutionContext
 
   def run(): Future[Enumerator[RowIterator]] = {
     val p = Promise[Enumerator[RowIterator]]
     writeQuery(p)
     p.future
-  }
-
-  private def failAndCleanup(t: Throwable, p: Promise[Enumerator[RowIterator]]) {
-    //p.failure(new Exception(msg, t))
-    p.failure(t)
-    onFailure(t)
   }
 
   private def writeQuery(p: Promise[Enumerator[RowIterator]]) {
@@ -58,7 +57,7 @@ abstract class PreparedStatementPipeline(query: String, params: Seq[QueryParam])
 
         case Success(ErrorResponse(msg, code)) =>
           val failMsg = s"Failed to execute statement. Code $code: $msg"
-          failAndCleanup(new Exception(failMsg), p)
+          failAndCleanup(new SQLRecoverableException(failMsg), p)
 
         case Success(CommandComplete(msg)) =>
           log("Command complete: " + msg)

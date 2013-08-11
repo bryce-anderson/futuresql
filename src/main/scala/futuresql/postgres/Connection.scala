@@ -177,35 +177,23 @@ private[postgres] abstract class Connection(login: Login)(implicit ec: Execution
     } finally  cleanAndRecycle()
   }
 
-  def query(inQuery: String): Future[Enumerator[RowIterator]] = {
-    val pipeline = new SimpleQueryPipeline {
-      protected def onFailure(t: Throwable) {
-        self.onDeath(self, t)
-      }
-      def writebuff = self.writebuff
-      def query = inQuery
-      def messagebuff: MessageBuffer = self.messagebuff
-      def log(msg: String) = self.log(msg)
-      implicit def ec: ExecutionContext = self.ec
-      def cancelQuery() = self.cancelQuery()
-      def onFinished() = self.cleanAndRecycle()
-    }
+  private abstract class PipelineUtils(val query: String) {
+    def writebuff                   = self.writebuff
+    def messagebuff: MessageBuffer  = self.messagebuff
+    def log(msg: String)            = self.log(msg)
+    def ec: ExecutionContext        = self.ec
+    def cancelQuery()               = self.cancelQuery()
+    def onFinished()                = self.cleanAndRecycle()
+    def onFailure(t: Throwable)     = self.onDeath(self, t)
+  }
 
+  def query(query: String): Future[Enumerator[RowIterator]] = {
+    val pipeline = new PipelineUtils(query) with SimpleQueryPipeline
     pipeline.run()
   }
 
-  def preparedQuery(query: String, params: Seq[QueryParam]): Future[Enumerator[RowIterator]] = {
-    val pipeline = new PreparedStatementPipeline(query, params) {
-      def onFinished() = self.cleanAndRecycle()
-      def messagebuff: MessageBuffer = self.messagebuff
-      def log(msg: String) = self.log(msg)
-      protected def onFailure(t: Throwable) {
-        self.onDeath(self, t)
-      }
-      protected implicit def ec: ExecutionContext = self.ec
-      def cancelQuery() = self.cancelQuery()
-      def writebuff: AsyncWriteBuffer = self.writebuff
-    }
+  def preparedQuery(query: String, inparams: Seq[QueryParam]): Future[Enumerator[RowIterator]] = {
+    val pipeline = new PipelineUtils(query) with PreparedStatementPipeline { def params: Seq[QueryParam] = inparams }
     pipeline.run()
   }
 
